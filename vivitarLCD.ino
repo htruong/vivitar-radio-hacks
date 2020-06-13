@@ -3,9 +3,31 @@
 
 volatile unsigned long _millis = 0;
 
-bool screen_spin_circle = true;
-bool screen_blink_colon = true;
+
+
+static const byte SERIAL_CMD_FIXED_LENGTH = 7;
+static const byte SERIAL_BYTE_START_MAGIC = 'C';
+static const byte SERIAL_BYTE_ACK_OK = 'K';
+static const byte SERIAL_BYTE_ACK_FAIL = 'F';
+byte serial_cmd[SERIAL_CMD_FIXED_LENGTH];
+
+enum serial_state_enum {
+  BYTE_START_MAGIC,
+  BYTE_CMD,
+  BYTE_PARAM_1,
+  BYTE_PARAM_2,
+  BYTE_PARAM_3,
+  BYTE_PARAM_4,
+  BYTE_CHECKSUM
+};
+
+
+volatile byte serial_state = BYTE_START_MAGIC;
+
+bool screen_spin_circle = false;
+bool screen_blink_colon = false;
 bool screen_blink_dot   = false;
+bool screen_draw_clock  = false;
 
 static const byte LED_PINS_COUNT = 7;
 static const byte SCREEN_SEGMENTS = 42;
@@ -13,6 +35,7 @@ static const byte DIGIT_LED_SEGMENTS = 7;
 
 static const byte PORTE_POS = 6;
 static const byte PORTE_POS_MASK = 1 << 6;
+static const byte SCREEN_SCANLINE_MS = 1;
 
 // Due to the way that the Arduino Pro micro is laid out
 // We almost have every pin on the same PORT, but then we can't
@@ -26,7 +49,6 @@ byte indicator_led = 17;
 volatile unsigned int current_scan_i = 0;
 volatile unsigned int current_scan_offset = 0;
 volatile bool screen_buf[SCREEN_SEGMENTS];
-volatile unsigned long screen_last_refresh;
 
 byte screen_segment[LED_PINS_COUNT * LED_PINS_COUNT] ={
   00, 12, 13, 16,  3,  4,  8,
@@ -53,8 +75,6 @@ bool digit_segments[][DIGIT_LED_SEGMENTS] = {
 };
 
 byte lcd_digit_start_segment[] = { 12, 19, 27, 35 };
-
-
 
 /// Encoder and buttons
 const int encoder_pin_a = 6;
@@ -185,6 +205,7 @@ void setup_screen() {
   for (byte i = 0; i < SCREEN_SEGMENTS; i++) {
     screen_buf[i] = false;
   }
+  draw_4digits(8888);
 }
 
 void refresh_screen() {
@@ -243,6 +264,7 @@ void loop() {
                   
   process_keyboard_events();
   process_screen_events();
+  process_serial();
   _millis += 1;
 }
 
@@ -254,6 +276,13 @@ void spin_circle() {
       screen_buf[8 + i] = (circle_segment == i);
     };
   }
+}
+
+void clear_spin_circle() {
+  for (byte i = 0; i < 3; i++) {
+    screen_buf[5 + i] = false;
+    screen_buf[8 + i] = false;
+  };  
 }
 
 void blink_segments() {
@@ -269,12 +298,84 @@ void blink_segments() {
 
 void process_screen_events() {
   if( _millis % 250 == 0 ) {
+    if (screen_draw_clock) {
       byte secs = _millis / 1000 % 60;
       byte minutes = _millis / 1000 / 60 % 100;
-      
-      draw_4digits(minutes*100 + secs);
-      blink_segments();
-      spin_circle();
+      byte hours = _millis / 1000 / 60 / 60 % 24;
+      draw_4digits(hours*100 + minutes);
+    }
+    blink_segments();
+    spin_circle();
   }
   refresh_screen();
+}
+
+void consume_serial(byte b) {
+  if (serial_state == BYTE_START_MAGIC) {
+    if (b != SERIAL_BYTE_START_MAGIC) {
+      Serial.write(SERIAL_BYTE_ACK_FAIL);
+    } else {
+      serial_state ++;
+    }
+  } else {
+    serial_cmd[serial_state - 1] = b;
+    serial_state = (serial_state + 1) % (SERIAL_CMD_FIXED_LENGTH + 1);
+    if (serial_state == BYTE_START_MAGIC) {
+      Serial.write(SERIAL_BYTE_ACK_OK);
+      serial_process_command();
+    }
+  }
+}
+
+void serial_process_command() {
+  //Serial.write("[Got command: ");
+  //Serial.write(serial_cmd, SERIAL_CMD_FIXED_LENGTH);
+  //Serial.write("\n]");
+
+  // Commands
+  // Draw clock:         C0|1
+  // Set time:           THHMM (24 hours)
+  // Set Precise time:   PBBBB (bytes)
+  // Draw spinning disc: S0|1
+  // Toggle screen bit:  BPP0|1 (PP is pixel number)
+
+  if (serial_cmd[0] == 'C') {
+    screen_draw_clock = (serial_cmd[1] == '1');
+    screen_blink_colon = screen_draw_clock ;
+  } else if (serial_cmd[0] == 'S') {
+    screen_spin_circle = (serial_cmd[1] == '1');
+    if (!screen_spin_circle) { 
+      clear_spin_circle();
+    }
+  } else if (serial_cmd[0] == 'T' | serial_cmd[0] == 'P') {
+    unsigned long offset_char = 0;
+    if (serial_cmd[0] == 'T') {
+      offset_char = '0';
+    }
+    unsigned long hh1 = serial_cmd[1]-offset_char;
+    unsigned long hh2 = serial_cmd[2]-offset_char;
+    unsigned long mm1 = serial_cmd[3]-offset_char;
+    unsigned long mm2 = serial_cmd[4]-offset_char;
+
+    if (serial_cmd[0] == 'T') {
+      _millis = ((hh1*10 + hh2) * 60 * 60 + (mm1*10 + mm2) * 60) * 1000;
+    } else {
+      _millis = (hh1 << 24 | hh1 << 16 | mm1 << 8 | mm2);
+    }
+    
+    debounce_millis = _millis;
+    last_mm_sample_time = _millis;
+  } else if (serial_cmd[0] == 'B') {
+    unsigned long offset_char = '0';
+    byte pp1 = serial_cmd[1]-offset_char;
+    byte pp2 = serial_cmd[2]-offset_char;
+    byte pos = pp1*10 + pp2;
+    screen_buf[pos] = (serial_cmd[3] == '1');
+  }
+}
+
+void process_serial() {
+  while (Serial.available() > 0) {
+    consume_serial(Serial.read());
+  }
 }
