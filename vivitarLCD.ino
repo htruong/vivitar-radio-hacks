@@ -5,7 +5,7 @@ volatile unsigned long _millis = 0;
 
 
 
-static const byte SERIAL_CMD_FIXED_LENGTH = 7;
+static const byte SERIAL_CMD_FIXED_LENGTH = 6;
 static const byte SERIAL_BYTE_START_MAGIC = 'C';
 static const byte SERIAL_BYTE_ACK_OK = 'K';
 static const byte SERIAL_BYTE_ACK_FAIL = 'F';
@@ -17,8 +17,7 @@ enum serial_state_enum {
   BYTE_PARAM_1,
   BYTE_PARAM_2,
   BYTE_PARAM_3,
-  BYTE_PARAM_4,
-  BYTE_CHECKSUM
+  BYTE_PARAM_4
 };
 
 
@@ -208,10 +207,6 @@ void setup_screen() {
   draw_4digits(8888);
 }
 
-void refresh_screen() {
-  draw_screen_fast();
-}
-
 void press_key(uint16_t k) {
   Serial.print(k);
     Consumer.write(k);
@@ -259,6 +254,9 @@ void setup() {
 }
 
 void loop() {
+  // I have checked and this LowPower actually makes the uC sleep for exactly 1ms
+  // I don't know where the bug is in this library
+  
   LowPower.idle(SLEEP_15MS, ADC_ON, TIMER4_OFF, TIMER3_OFF, TIMER1_OFF, 
                   TIMER0_OFF, SPI_OFF, USART1_ON, TWI_OFF, USB_ON);
                   
@@ -297,17 +295,17 @@ void blink_segments() {
 
 
 void process_screen_events() {
-  if( _millis % 250 == 0 ) {
+  if( _millis % 50 == 0 ) {
     if (screen_draw_clock) {
       byte secs = _millis / 1000 % 60;
-      byte minutes = _millis / 1000 / 60 % 100;
+      byte minutes = _millis / 1000 / 60 % 60;
       byte hours = _millis / 1000 / 60 / 60 % 24;
       draw_4digits(hours*100 + minutes);
     }
     blink_segments();
     spin_circle();
   }
-  refresh_screen();
+  draw_screen_fast();
 }
 
 void consume_serial(byte b) {
@@ -333,23 +331,28 @@ void serial_process_command() {
   //Serial.write("\n]");
 
   // Commands
-  // Draw clock:         C0|1
+  // Draw clock:         Cb (b=0|1)
   // Set time:           THHMM (24 hours)
   // Set Precise time:   PBBBB (bytes)
-  // Draw spinning disc: S0|1
-  // Toggle screen bit:  BPP0|1 (PP is pixel number)
+  // Display number:     DNNNN
+  // Draw spinning disc: Sb (b=0|1)
+  // Toggle screen bit:  BPPb (PP is pixel number, b=0|1)
+  // Set raw display bit:Rlbbb (l=0|1 low or high, b=byte)
+  
+  // So send something like CC100\n will draw the clock
 
-  if (serial_cmd[0] == 'C') {
+  byte cmd = serial_cmd[0];
+  if (cmd == 'C') {
     screen_draw_clock = (serial_cmd[1] == '1');
     screen_blink_colon = screen_draw_clock ;
-  } else if (serial_cmd[0] == 'S') {
+  } else if (cmd == 'S') {
     screen_spin_circle = (serial_cmd[1] == '1');
     if (!screen_spin_circle) { 
       clear_spin_circle();
     }
-  } else if (serial_cmd[0] == 'T' | serial_cmd[0] == 'P') {
+  } else if (cmd == 'T' || cmd == 'P' || cmd == 'D') {
     unsigned long offset_char = 0;
-    if (serial_cmd[0] == 'T') {
+    if (cmd != 'P') {
       offset_char = '0';
     }
     unsigned long hh1 = serial_cmd[1]-offset_char;
@@ -357,20 +360,36 @@ void serial_process_command() {
     unsigned long mm1 = serial_cmd[3]-offset_char;
     unsigned long mm2 = serial_cmd[4]-offset_char;
 
-    if (serial_cmd[0] == 'T') {
+    if (cmd == 'D') {
+      screen_draw_clock = false;
+      screen_blink_colon = false;
+      draw_4digits(hh1 * 1000 + hh2 * 100 + mm1 * 10 + mm2);
+      return;
+    }
+
+    if (cmd == 'T') {
       _millis = ((hh1*10 + hh2) * 60 * 60 + (mm1*10 + mm2) * 60) * 1000;
     } else {
       _millis = (hh1 << 24 | hh1 << 16 | mm1 << 8 | mm2);
     }
-    
+
     debounce_millis = _millis;
     last_mm_sample_time = _millis;
-  } else if (serial_cmd[0] == 'B') {
+  } else if (cmd == 'B') {
     unsigned long offset_char = '0';
     byte pp1 = serial_cmd[1]-offset_char;
     byte pp2 = serial_cmd[2]-offset_char;
     byte pos = pp1*10 + pp2;
     screen_buf[pos] = (serial_cmd[3] == '1');
+  } else if (cmd == 'R') {
+    byte offset = (serial_cmd[1] == 0) ? 0 : 1;
+    for (byte i = 0; i < 3; i++) {
+      unsigned long _byte = serial_cmd[2 + i];
+      for (byte j = 0; j < 8; j++) {
+        screen_buf[offset * 24 + i * 8 + j]=_byte & 0x1;
+        _byte = _byte >> 1;
+      }
+    }
   }
 }
 
