@@ -142,9 +142,9 @@ void kbd_handle_volume_knob() {
 
   if ((encoder_a == HIGH) && (encoder_b == HIGH)) {
     if ((kbd_encoder_a_l == LOW) && (kbd_encoder_b_l == HIGH)) {
-      press_key(MEDIA_VOL_UP);      
+      kbd_press_key(MEDIA_VOL_UP);      
     } else if ((kbd_encoder_b_l == LOW) && (kbd_encoder_a_l == HIGH)) {
-      press_key(MEDIA_VOL_DOWN);
+      kbd_press_key(MEDIA_VOL_DOWN);
     }
   }
   
@@ -165,7 +165,6 @@ void kbd_press_key(uint16_t k) {
   Serial.print(k);
   Consumer.write(k);
 }
-
 
 void kbd_events_process() {
   kbd_handle_volume_knob();
