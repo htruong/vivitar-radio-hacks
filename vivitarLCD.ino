@@ -5,12 +5,12 @@ volatile unsigned long _millis = 0;
 
 
 // Keyboard
-const int kbd_encoder_pin_a = 6;
-const int kbd_encoder_pin_b = 5;
-const int kbd_push_buttons_pin = A0;
-const int kbd_adc_sample_delay_ms = 100;
-const int kbd_debouncer_ms = 5;
-const int kbd_keyrepeat_ms = 500;
+const byte kbd_encoder_pin_a = 6;
+const byte kbd_encoder_pin_b = 5;
+const byte kbd_push_buttons_pin = A0;
+const unsigned long kbd_adc_sample_delay_ms = 100;
+const unsigned long kbd_debouncer_ms = 5;
+const unsigned long kbd_keyrepeat_ms = 500;
 
 unsigned long kbd_last_mm_sample_time = 0;
 unsigned long kbd_debounce_millis = 0;
@@ -19,13 +19,7 @@ unsigned long kbd_last_key_press = 0;
 boolean kbd_encoder_a_l = LOW;
 boolean kbd_encoder_b_l = LOW;
 
-
 // Screen
-bool scr_scr_spin_circle = false;
-bool scr_blink_colon = false;
-bool scr_blink_dot   = false;
-bool scr_draw_clock  = false;
-
 static const byte SCR_LED_PINS_COUNT = 7;
 static const byte SCR_SEGMENTS = 42;
 static const byte SCR_DIGIT_LED_SEGMENTS = 7;
@@ -34,18 +28,7 @@ static const byte SCR_PORTE_POS = 6;
 static const byte SCR_PORTE_POS_MASK = 1 << 6;
 static const byte SCR_SCANLINE_MS = 1;
 
-// Due to the way that the Arduino Pro micro is laid out
-// We almost have every pin on the same PORT, but then we can't
-// First pin has to be on port PE6
-// Do not change this, if you change this,
-// The scr_draw_fast() won't work correctly no more
-byte scr_led_pins[SCR_LED_PINS_COUNT] = {7, 15, 16, 14, 8, 9, 10};
-
-volatile unsigned int scr_current_scan_i = 0;
-volatile unsigned int scr_current_scan_offset = 0;
-volatile bool scr_buf[SCR_SEGMENTS];
-
-byte scr_segment[SCR_LED_PINS_COUNT * SCR_LED_PINS_COUNT] ={
+static const byte scr_segment[SCR_LED_PINS_COUNT * SCR_LED_PINS_COUNT] ={
   00, 12, 13, 16,  3,  4,  8,
   17, 00, 19, 20, 23, 22, 11,
   18, 24, 00, 26, 28,  2,  6,
@@ -55,7 +38,7 @@ byte scr_segment[SCR_LED_PINS_COUNT * SCR_LED_PINS_COUNT] ={
   9,  0,  5, 10, 34, 35, 00 
 };
 
-bool scr_digit_segments[][SCR_DIGIT_LED_SEGMENTS] = {
+static const bool scr_digit_segments[][SCR_DIGIT_LED_SEGMENTS] = {
   { 1,1,1,1,1,1,0 },
   { 0,1,1,0,0,0,0 },
   { 1,1,0,1,1,0,1 },
@@ -69,16 +52,25 @@ bool scr_digit_segments[][SCR_DIGIT_LED_SEGMENTS] = {
   { 0,0,0,0,0,0,0 },  
 };
 
-byte scr_lcd_digit_start_segment[] = { 12, 19, 27, 35 };
+// Due to the way that the Arduino Pro micro is laid out
+// We almost have every pin on the same PORT, but then we can't
+// First pin has to be on port PE6
+// Do not change this, if you change this,
+// The scr_draw_fast() won't work correctly no more
+byte scr_led_pins[SCR_LED_PINS_COUNT] = {7, 15, 16, 14, 8, 9, 10};
 
+static const byte scr_lcd_digit_start_segment[] = { 12, 19, 27, 35 };
+
+bool scr_scr_spin_circle = false;
+bool scr_blink_colon = false;
+bool scr_blink_dot   = false;
+bool scr_draw_clock  = false;
+
+unsigned int scr_current_scan_i = 0;
+unsigned int scr_current_scan_offset = 0;
+bool scr_buf[SCR_SEGMENTS];
 
 // Serial command interface
-static const byte SER_CMD_FIXED_LENGTH = 6;
-static const byte SER_BYTE_START_MAGIC = 'C';
-static const byte SER_BYTE_ACK_OK = 'K';
-static const byte SER_BYTE_ACK_FAIL = 'F';
-byte ser_cmd[SER_CMD_FIXED_LENGTH];
-
 enum ser_state_enum {
   BYTE_START_MAGIC,
   BYTE_CMD,
@@ -88,7 +80,13 @@ enum ser_state_enum {
   BYTE_PARAM_4
 };
 
-volatile byte ser_state = BYTE_START_MAGIC;
+static const byte SER_CMD_FIXED_LENGTH = 6;
+static const byte SER_BYTE_START_MAGIC = 'C';
+static const byte SER_BYTE_ACK_OK = 'K';
+static const byte SER_BYTE_ACK_FAIL = 'F';
+
+byte ser_cmd[SER_CMD_FIXED_LENGTH];
+byte ser_state = BYTE_START_MAGIC;
 
 ///////////////////////////////////////////
 /* Keyboard handling functions */
